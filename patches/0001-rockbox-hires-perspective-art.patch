@@ -1,0 +1,195 @@
+diff --git a/apps/gui/skin_engine/skin_display.c b/apps/gui/skin_engine/skin_display.c
+index 2a6f807..7bf712c 100644
+--- a/apps/gui/skin_engine/skin_display.c
++++ b/apps/gui/skin_engine/skin_display.c
+@@ -647,6 +647,110 @@ void draw_peakmeters(struct gui_wps *gwps, int line_number,
+     }
+ }
+ 
++
++#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR) && (LCD_DEPTH == 24)
++/* iPod classic style "Now Playing" artwork: the cover is turned about its vertical axis
++ * (left edge nearest, right edge receding) with a faded mirror image underneath.
++ * Edges are anti-aliased against whatever is already in the framebuffer. */
++#define PERSP_RIGHT_NUM 89   /* height of the right edge in percent of the left edge */
++#define REFL_ALPHA_MAX  90   /* reflection opacity at the cover edge, 0..256 */
++static inline void persp_blend(fb_data *d, const fb_data *s00, const fb_data *s10,
++                               const fb_data *s01, const fb_data *s11,
++                               int fx, int fy, int alpha)
++{
++    int w00 = (256 - fx) * (256 - fy), w10 = fx * (256 - fy);
++    int w01 = (256 - fx) * fy,         w11 = fx * fy;
++    int r = (s00->r * w00 + s10->r * w10 + s01->r * w01 + s11->r * w11) >> 16;
++    int g = (s00->g * w00 + s10->g * w10 + s01->g * w01 + s11->g * w11) >> 16;
++    int b = (s00->b * w00 + s10->b * w10 + s01->b * w01 + s11->b * w11) >> 16;
++    d->r = (r * alpha + d->r * (256 - alpha)) >> 8;
++    d->g = (g * alpha + d->g * (256 - alpha)) >> 8;
++    d->b = (b * alpha + d->b * (256 - alpha)) >> 8;
++}
++
++static void draw_art_perspective(struct viewport *vp, const fb_data *src,
++                                 int bw, int bh, int stride, int ox, int oy)
++{
++    /* fixed point 16.16 maths for the per-column projection */
++    const int r = PERSP_RIGHT_NUM;                         /* percent */
++    const int k = (100 * 65536) / r - 65536;               /* k = 1/r - 1 (16.16) */
++    const int refl_h = bh / 4;
++    int X;
++    for (X = 0; X < bw; X++)
++    {
++        int ax = vp->x + ox + X;
++        if (ax < vp->x || ax >= vp->x + vp->width || ax < 0 || ax >= LCD_WIDTH)
++            continue;
++        /* t = (X+0.5)/bw * r, u = t / (1 - k*t) */
++        int t = (int)(((long long)(2 * X + 1) * 65536 * r) / (2 * bw * 100));  /* 16.16 */
++        int den = 65536 - (int)(((long long)k * t) >> 16);
++        if (den <= 0) den = 1;
++        int u = (int)(((long long)t << 16) / den);          /* 16.16, 0..1 */
++        if (u > 65536) u = 65536;
++        int d = 65536 + (int)(((long long)k * u) >> 16);    /* depth, 16.16 */
++        int hc = (int)(((long long)bh * 65536 * 65536) / d);/* column height, 16.16 */
++        int top = (oy * 65536 + (bh * 65536) / 2) - hc / 2; /* 16.16 */
++        int bot = top + hc;
++        /* source column */
++        int sxf = (int)(((long long)u * bw) >> 8) - 128;    /* 8.8, centre of texel */
++        if (sxf < 0) sxf = 0;
++        int sx = sxf >> 8, fx = sxf & 255;
++        if (sx >= bw - 1) { sx = bw - 2 < 0 ? 0 : bw - 2; fx = 255; }
++        int sx1 = (sx + 1 < bw) ? sx + 1 : sx;
++        int y0 = top >> 16, y1 = (bot + 65535) >> 16;
++        int y;
++        for (y = y0; y < y1 + refl_h; y++)
++        {
++            int ay = vp->y + y;
++            if (y < 0 || y >= vp->height || ay < 0 || ay >= LCD_HEIGHT)
++                continue;
++            int alpha, v;                                    /* v: 16.16 along the cover */
++            if (y < y1)
++            {
++                int lo = (y << 16) > top ? (y << 16) : top;
++                int hi = ((y + 1) << 16) < bot ? ((y + 1) << 16) : bot;
++                if (hi <= lo) continue;
++                alpha = ((hi - lo) * 256) >> 16;
++                int mid = (y << 16) + 32768;
++                if (mid < top) mid = top;
++                if (mid > bot) mid = bot;
++                v = (int)(((long long)(mid - top) << 16) / hc);
++            }
++            else
++            {
++                int dist = (y << 16) + 32768 - bot;          /* below the bottom edge */
++                if (dist < 0) continue;
++                int fade = 65536 - (int)(((long long)dist) / refl_h);   /* 1 -> 0 */
++                if (fade <= 0) continue;
++                fade = (int)(((long long)fade * fade) >> 16);
++                alpha = (REFL_ALPHA_MAX * fade) >> 16;
++                if (alpha <= 0) continue;
++                v = 65536 - (int)(((long long)dist << 16) / hc);
++                if (v < 0) continue;
++            }
++            int syf = (int)(((long long)v * bh) >> 8) - 128;
++            if (syf < 0) syf = 0;
++            int sy = syf >> 8, fy = syf & 255;
++            if (sy >= bh - 1) { sy = bh - 2 < 0 ? 0 : bh - 2; fy = 255; }
++            int sy1 = (sy + 1 < bh) ? sy + 1 : sy;
++            fb_data *dst = FBADDR(ax, ay);
++            if (y < y1 && (((y + 1) << 16) > bot) && bh >= 2)
++            {
++                /* the bottom edge row is only partly covered: put the start of the
++                 * reflection underneath first, so the uncovered part does not show
++                 * the plain background (a bright, jagged line otherwise) */
++                persp_blend(dst, &src[(bh - 2) * stride + sx], &src[(bh - 2) * stride + sx1],
++                            &src[(bh - 1) * stride + sx], &src[(bh - 1) * stride + sx1],
++                            fx, 255, REFL_ALPHA_MAX);
++            }
++            persp_blend(dst, &src[sy * stride + sx], &src[sy * stride + sx1],
++                        &src[sy1 * stride + sx], &src[sy1 * stride + sx1],
++                        fx, fy, alpha);
++        }
++    }
++}
++#endif
++
+ #ifdef HAVE_ALBUMART
+ /* Draw the album art bitmap from the given handle ID onto the given WPS.
+    Call with clear = true to clear the bitmap instead of drawing it. */
+@@ -694,6 +798,25 @@ void draw_album_art(struct gui_wps *gwps, int handle_id, bool clear)
+             y += (aa->height - height) / 2;
+     }
+ 
++#if defined(HAVE_LCD_COLOR) && (LCD_DEPTH == 24)
++    if (aa->perspective && gwps->display->screen_type == SCREEN_MAIN)
++    {
++        if (!clear)
++        {
++            draw_art_perspective(lcd_current_viewport, (const fb_data *)bmp->data,
++                                 bmp->width, bmp->height,
++                                 STRIDE(gwps->display->screen_type, bmp->width, bmp->height),
++                                 x, y);
++        }
++        else
++        {
++            gwps->display->set_drawmode(DRMODE_SOLID|DRMODE_INVERSEVID);
++            gwps->display->fillrect(x, y, width, height + height / 4);
++            gwps->display->set_drawmode(DRMODE_SOLID);
++        }
++        return;
++    }
++#endif
+     if (!clear)
+     {
+         /* Draw the bitmap */
+diff --git a/apps/gui/skin_engine/skin_parser.c b/apps/gui/skin_engine/skin_parser.c
+index 1030d39..e7ff7f0 100644
+--- a/apps/gui/skin_engine/skin_parser.c
++++ b/apps/gui/skin_engine/skin_parser.c
+@@ -1435,6 +1435,9 @@ static int parse_albumart_load(struct skin_element* element,
+     aa->width =  percent_parse_param(get_param(element, 2), curr_vp->vp.width);
+     aa->height =  percent_parse_param(get_param(element, 3), curr_vp->vp.height);
+     aa->draw_handle = -1;
++    aa->perspective = false;
++    if (element->params_count > 6 && !isdefault(get_param(element, 6)))
++        aa->perspective = (tolower(*get_param_text(element, 6)) == 'p');
+ 
+     /* if we got here, we parsed everything ok .. ! */
+     if (aa->width < 0)
+diff --git a/apps/gui/skin_engine/wps_internals.h b/apps/gui/skin_engine/wps_internals.h
+index d007fe6..9bd4fe4 100644
+--- a/apps/gui/skin_engine/wps_internals.h
++++ b/apps/gui/skin_engine/wps_internals.h
+@@ -277,6 +277,7 @@ struct skin_albumart {
+     unsigned char xalign; /* WPS_ALBUMART_ALIGN_LEFT, _CENTER, _RIGHT */
+     unsigned char yalign; /* WPS_ALBUMART_ALIGN_TOP, _CENTER, _BOTTOM */
+     unsigned char state; /* WPS_ALBUMART_NONE, _CHECK, _LOAD */
++    bool perspective;    /* draw with an iPod-classic style perspective + reflection */
+ 
+     int draw_handle;
+ };
+diff --git a/firmware/export/config/retro-handheld.h b/firmware/export/config/retro-handheld.h
+index a23b8e9..eb35ad4 100644
+--- a/firmware/export/config/retro-handheld.h
++++ b/firmware/export/config/retro-handheld.h
+@@ -39,8 +39,8 @@
+ #define HAVE_TAGCACHE
+ 
+ /* LCD dimensions */
+-#define LCD_WIDTH  320
+-#define LCD_HEIGHT 240
++#define LCD_WIDTH  640
++#define LCD_HEIGHT 480
+ #define LCD_DEPTH  24
+ #define LCD_PIXELFORMAT RGB888
+ 
+diff --git a/lib/skin_parser/tag_table.c b/lib/skin_parser/tag_table.c
+index 2278dd2..ca723d4 100644
+--- a/lib/skin_parser/tag_table.c
++++ b/lib/skin_parser/tag_table.c
+@@ -201,7 +201,7 @@ static const struct tag_info legal_tags[] =
+     TAG(SKIN_TOKEN_DRAW_INBUILTBAR,       "wi", "", SKIN_REFRESH_STATIC|NOBREAK),
+ 
+     TAG(SKIN_TOKEN_LOAD_FONT,             "Fl" , "IF|I", 0|NOBREAK),
+-    TAG(SKIN_TOKEN_ALBUMART_LOAD,         "Cl" , "[iP][iP][iP][iP]|ss", 0|NOBREAK),
++    TAG(SKIN_TOKEN_ALBUMART_LOAD,         "Cl" , "[iP][iP][iP][iP]|sss", 0|NOBREAK),
+     TAG(SKIN_TOKEN_ALBUMART_DISPLAY,      "Cd" , "", SKIN_REFRESH_STATIC),
+     TAG(SKIN_TOKEN_ALBUMART_FOUND,        "C" , "", SKIN_REFRESH_STATIC),
+ 

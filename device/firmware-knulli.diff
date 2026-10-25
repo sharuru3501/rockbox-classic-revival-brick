@@ -1,0 +1,17 @@
+--- a/firmware/knulli
++++ b/firmware/knulli
+@@ -15,8 +15,12 @@
+   )
+   # Turn off idle settings and backup brightness
+   touch /var/run/battery-saver/rockbox.pause
++  # ignore power-button suspend while Rockbox runs so playback continues with screen off
++  touch /var/run/suspend.debounce
++  # smooth (linear) upscaling of the 320x240 UI to the 1024x768 panel
++  export SDL_RENDER_SCALE_QUALITY=1
+   KNULLI_BL=$(batocera-brightness)
+ elif [[ "$RB_STATE" == "EXIT" ]]; then
+-  rm /var/run/battery-saver/rockbox.pause
++  rm -f /var/run/battery-saver/rockbox.pause /var/run/suspend.debounce
+   batocera-brightness $KNULLI_BL
+ fi
+\ No newline at end of file

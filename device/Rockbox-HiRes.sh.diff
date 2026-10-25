@@ -1,0 +1,37 @@
+--- a/Rockbox.sh
++++ b/Rockbox-HiRes.sh
+@@ -1,5 +1,5 @@
+ #!/bin/bash
+-# PORTMASTER: rockbox.zip, Rockbox.sh
++# PORTMASTER: rockbox.zip, Rockbox-HiRes.sh
+ 
+ ### Portmaster spec ###
+ 
+@@ -19,7 +19,7 @@
+ [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+ get_controls
+ 
+-GAMEDIR=/$directory/ports/rockbox
++GAMEDIR=/$directory/ports/rockbox-hires
+ 
+ cd $GAMEDIR
+ 
+@@ -87,7 +87,8 @@
+ ### Setup bind and patch themes ###
+ 
+ # bind RBDIR to rootfs.
+-if [ ! -f "/tmp/rockbox/rockbox" ]; then
++umount /tmp/rockbox 2>/dev/null  # drop a stale bind from the other Rockbox build
++if true; then  # always (re)bind: both Rockbox builds share /tmp/rockbox
+ bind_directories /tmp/rockbox $GAMEDIR
+ fi
+ 
+@@ -141,7 +142,7 @@
+ $GPTOKEYB2 "rockbox" -c "./rockbox.gptk" &
+ pm_platform_helper "$GAMEDIR/rockbox"
+ sleep 1 # Seems like TUI Smart Pro needs a 1 sec delay... for reasons...
+-./rockbox --zoom $ZOOM_VAL
++./rockbox --zoom 1.6
+ 
+ # CFW specific restore commands
+ RB_STATE="EXIT"

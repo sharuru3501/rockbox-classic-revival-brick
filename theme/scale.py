@@ -64,7 +64,8 @@ for root, dirs, files in os.walk(src):
         if f.endswith(('.wps', '.sbs', '.fms')):
             CUR['ext'] = os.path.splitext(f)[1]
             t = open(p, encoding='utf-8').read()
-            t = '\n'.join(l if l.startswith('#') else pat.sub(repl, l) for l in t.split('\n'))
+            # on-screen labels: use "Rockbox" instead of the trademarked player name (comments keep the credits)
+            t = '\n'.join(l if l.startswith('#') else pat.sub(repl, l).replace('iPod', 'Rockbox') for l in t.split('\n'))
             if f.endswith('.sbs'):
                 t = re.sub(r'%Vl\((s|f|m),(\d+),10,(\d+),30,-\)%Vg\(599AD7,2677C3,FFFFFF\)', r'%Vl(\1,\2,6,\3,36,-)%Vg(619FDA,2274C1,FFFFFF)', t)
             open(q, 'w', encoding='utf-8').write(fix_fonts(t))

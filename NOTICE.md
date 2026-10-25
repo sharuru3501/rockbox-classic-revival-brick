@@ -12,3 +12,5 @@ A theme converted with these scripts is a derivative of "Classic Revival" and mu
 CC BY-SA 4.0 with attribution. Generated fonts are derived from Noto Sans CJK (OFL 1.1).
 
 No music, album artwork or personal data is included.
+
+`theme/scale.py` replaces the on-screen label of the original theme (the player name of the device it imitates) with "Rockbox"; credit comments in the skin files are kept.

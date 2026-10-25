@@ -65,7 +65,9 @@ Album art with a non-square aspect ratio has not been checked.
 
 ## Licence
 
-GPL-2.0-or-later for the patch and the scripts (`LICENSE`). Other material: see `NOTICE.md`.
+GPL-2.0-or-later for the patch, the scripts and the launcher diffs (`LICENSE`). The two screenshots in
+`docs/images/` show the Classic Revival theme and are CC BY-SA 4.0 (credit: Doug Belshaw, Humberto Santana).
+Other material: see `NOTICE.md`.
 The Classic Revival theme imitates the look of Apple's iPod classic. iPod is a trademark of Apple Inc.;
 Rockbox and other names belong to their respective owners. This project is not affiliated with or endorsed by
 Apple, the Rockbox project, TrimUI or the Knulli project.
